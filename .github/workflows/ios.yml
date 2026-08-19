@@ -1,0 +1,138 @@
+# Name of the GitHub Actions workflow.
+name: XCUI Tests
+
+on:
+  pull_request:
+    branches: ["master", "main"]
+
+  push:
+    branches: ["master", "main"]
+
+  schedule:
+    # Run every day at 06:00 UTC
+    - cron: "0 6 * * *"
+
+# Minimum permissions required.
+permissions:
+  contents: read
+
+jobs:
+  xcui-tests:
+    name: XCUI Tests
+
+    # XCUI requires macOS + Xcode + iOS Simulator.
+    runs-on: macos-15
+
+    timeout-minutes: 45
+
+    steps:
+
+      # ---------------------------------------------------------
+      # 1. Checkout source code
+      # ---------------------------------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      # ---------------------------------------------------------
+      # 2. Select Xcode version
+      # ---------------------------------------------------------
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          xcrun simctl list devices
+
+      # ---------------------------------------------------------
+      # 3. Show available simulators
+      # ---------------------------------------------------------
+      - name: List available iOS simulators
+        run: |
+          xcrun simctl list devices available
+
+      # ---------------------------------------------------------
+      # 4. Run XCUI tests
+      #
+      # IMPORTANT:
+      # Replace these values according to your project:
+      #
+      # -workspace MyApp.xcworkspace
+      # -scheme MyApp
+      # -destination ...
+      # ---------------------------------------------------------
+      - name: Run XCUI tests
+        run: |
+          mkdir -p test-results
+
+          xcodebuild test \
+            -workspace MyApp.xcworkspace \
+            -scheme MyApp \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -resultBundlePath test-results/XCUIResults.xcresult \
+            | tee test-results/xcodebuild.log
+
+      # ---------------------------------------------------------
+      # 5. Generate human-readable test report
+      # ---------------------------------------------------------
+      - name: Generate XCUI test report
+        if: ${{ always() }}
+        run: |
+          echo "Generating XCUI test summary..."
+
+          xcrun xcresulttool get test-results/XCUIResults.xcresult \
+            --format json > test-results/xcresult.json || true
+
+      # ---------------------------------------------------------
+      # 6. Create JUnit-style report
+      #
+      # xcresult is the native Apple test result format.
+      # Keep the xcresult bundle as the primary report.
+      # ---------------------------------------------------------
+      - name: Create test execution summary
+        if: ${{ always() }}
+        run: |
+          echo "# XCUI Test Execution Report" > test-results/test-summary.md
+          echo "" >> test-results/test-summary.md
+          echo "## Workflow Information" >> test-results/test-summary.md
+          echo "" >> test-results/test-summary.md
+          echo "- Repository: ${{ github.repository }}" >> test-results/test-summary.md
+          echo "- Branch: ${{ github.ref_name }}" >> test-results/test-summary.md
+          echo "- Commit: ${{ github.sha }}" >> test-results/test-summary.md
+          echo "- Runner: ${{ runner.os }}" >> test-results/test-summary.md
+          echo "- Run ID: ${{ github.run_id }}" >> test-results/test-summary.md
+          echo "" >> test-results/test-summary.md
+          echo "## Xcode Version" >> test-results/test-summary.md
+          xcodebuild -version >> test-results/test-summary.md
+          echo "" >> test-results/test-summary.md
+          echo "## Test Result" >> test-results/test-summary.md
+          echo "" >> test-results/test-summary.md
+          echo "The complete Apple XCResult bundle is available as a workflow artifact." >> test-results/test-summary.md
+
+      # ---------------------------------------------------------
+      # 7. Upload XCUI test report
+      #
+      # always() ensures the report is uploaded even when
+      # XCUI tests fail.
+      # ---------------------------------------------------------
+      - name: Upload XCUI test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcui-test-results
+          path: |
+            test-results/
+          retention-days: 14
+
+      # ---------------------------------------------------------
+      # 8. Upload screenshots / attachments if generated
+      # ---------------------------------------------------------
+      - name: Upload test screenshots and attachments
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcui-test-artifacts
+          path: |
+            **/*.xcresult
+            **/Screenshots/**
+            **/Attachments/**
+          retention-days: 14
+          if-no-files-found: ignore
