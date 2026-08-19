@@ -248,4 +248,3 @@ jobs:
           fi
 
           echo "✅ All XCUI tests passed successfully."
-```
