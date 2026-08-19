@@ -12,7 +12,6 @@ on:
       - main
 
   schedule:
-    # Daily at 06:00 UTC
     - cron: "0 6 * * *"
 
   # Allows manual execution from GitHub Actions
@@ -26,7 +25,7 @@ jobs:
 
     name: XCUI Tests
 
-    # XCUI tests require macOS and Xcode.
+    # XCUI tests require macOS + Xcode
     runs-on: macos-15
 
     timeout-minutes: 60
@@ -44,7 +43,7 @@ jobs:
       # ==========================================================
       - name: Select Xcode
         run: |
-          echo "Available Xcode installations:"
+          echo "Available Xcode versions:"
           ls -la /Applications | grep Xcode || true
 
           sudo xcode-select -s /Applications/Xcode.app
@@ -56,15 +55,15 @@ jobs:
           xcodebuild -version
 
       # ==========================================================
-      # 3. Show available iOS simulators
+      # 3. List available simulators
       # ==========================================================
       - name: List available iOS simulators
         run: |
-          echo "Available simulators:"
+          echo "Available iOS simulators:"
           xcrun simctl list devices available
 
       # ==========================================================
-      # 4. Clean previous test results
+      # 4. Prepare test results directory
       # ==========================================================
       - name: Prepare test results directory
         run: |
@@ -72,66 +71,63 @@ jobs:
           mkdir -p test-results
 
       # ==========================================================
-      # 5. Build and execute XCUI tests
+      # 5. Run XCUI tests
       #
       # IMPORTANT:
-      # CHANGE THESE VALUES:
+      # Change:
       #
-      #   MyApp.xcworkspace -> your workspace
-      #   MyApp             -> your scheme
-      #   iPhone 16         -> your simulator
+      # MyApp.xcworkspace
+      # MyApp
+      # iPhone 16
       #
-      # If you have .xcodeproj instead of .xcworkspace,
-      # replace -workspace with -project.
+      # according to your project.
       # ==========================================================
       - name: Run XCUI tests
         id: xcui_tests
         continue-on-error: true
         run: |
-          set -o pipefail
-
           echo "Starting XCUI test execution..."
 
-          xcodebuild test \
+          set +e
+
+          xcodebuild \
             -workspace MyApp.xcworkspace \
             -scheme MyApp \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -resultBundlePath "$PWD/test-results/XCUIResults.xcresult" \
             clean test \
-            | tee "$PWD/test-results/xcodebuild.log"
+            2>&1 | tee "$PWD/test-results/xcodebuild.log"
+
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+
+          echo "XCUI_TEST_EXIT_CODE=$TEST_EXIT_CODE" >> "$GITHUB_ENV"
+
+          echo ""
+          echo "======================================"
+          echo "XCUI Test Exit Code: $TEST_EXIT_CODE"
+          echo "======================================"
+
+          exit 0
 
       # ==========================================================
-      # 6. Check whether XCUI test execution failed
+      # 6. Generate xcresult JSON report
       # ==========================================================
-      - name: Check XCUI test result
-        id: test_status
+      - name: Generate XCUI result report
         if: always()
         run: |
-          if [ "${{ steps.xcui_tests.outcome }}" = "success" ]; then
-            echo "status=PASSED" >> "$GITHUB_OUTPUT"
-            echo "emoji=✅" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=FAILED" >> "$GITHUB_OUTPUT"
-            echo "emoji=❌" >> "$GITHUB_OUTPUT"
-          fi
 
-      # ==========================================================
-      # 7. Extract test result information
-      # ==========================================================
-      - name: Generate XCUI test report
-        if: always()
-        run: |
-          echo "Generating XCUI test report..."
+          echo "Generating XCUI result report..."
 
           if [ -d "test-results/XCUIResults.xcresult" ]; then
 
             echo "XCResult bundle found."
 
-            xcrun xcresulttool get test-results/XCUIResults.xcresult \
+            xcrun xcresulttool get \
+              test-results/XCUIResults.xcresult \
               --format json \
               > test-results/xcresult.json 2>/dev/null || true
 
-            echo "XCResult report generated."
+            echo "XCResult JSON generated."
 
           else
 
@@ -142,9 +138,9 @@ jobs:
           fi
 
       # ==========================================================
-      # 8. Create GitHub Actions Job Summary
+      # 7. Extract test summary
       # ==========================================================
-      - name: Publish XCUI Test Summary
+      - name: Generate test execution summary
         if: always()
         run: |
 
@@ -152,56 +148,59 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## Test Status" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Test Execution" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "| Information | Details |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------------|---------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Status | ${{ steps.test_status.outputs.emoji }} ${{ steps.test_status.outputs.status }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repository | ${{ github.repository }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit | `${{ github.sha }}` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Runner | ${{ runner.os }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Xcode | $(xcodebuild -version | head -1) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test Exit Code | ${XCUI_TEST_EXIT_CODE:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## 📊 Test Result" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${XCUI_TEST_EXIT_CODE:-1}" = "0" ]; then
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "${{ steps.xcui_tests.outcome }}" = "success" ]; then
-
-            echo "### ✅ XCUI Tests Passed" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ✅ XCUI Tests Passed" >> "$GITHUB_STEP_SUMMARY"
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
 
-            echo "The XCUI test execution completed successfully." >> "$GITHUB_STEP_SUMMARY"
+            echo "All XCUI tests completed successfully." >> "$GITHUB_STEP_SUMMARY"
 
           else
 
-            echo "### ❌ XCUI Tests Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ❌ XCUI Tests Failed" >> "$GITHUB_STEP_SUMMARY"
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
 
-            echo "One or more XCUI tests failed. Download the **xcui-test-results** artifact for detailed debugging information." >> "$GITHUB_STEP_SUMMARY"
+            echo "One or more XCUI tests failed." >> "$GITHUB_STEP_SUMMARY"
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+
+            echo "Download the **xcui-test-results** artifact to investigate the failure." >> "$GITHUB_STEP_SUMMARY"
 
           fi
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## 📦 Available Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 Test Artifacts" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "- **xcui-test-results** - Complete XCResult bundle, logs and JSON report" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **xcui-test-artifacts** - Screenshots and test attachments" >> "$GITHUB_STEP_SUMMARY"
+          echo "- XCResult bundle" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Xcode build/test log" >> "$GITHUB_STEP_SUMMARY"
+          echo "- XCResult JSON report" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Screenshots and attachments, if generated" >> "$GITHUB_STEP_SUMMARY"
 
       # ==========================================================
-      # 9. Upload XCUI result bundle
+      # 8. Upload XCUI test results
       #
-      # ALWAYS upload, even if tests fail.
+      # IMPORTANT:
+      # always() ensures artifacts are uploaded even if tests fail.
       # ==========================================================
       - name: Upload XCUI test results
         if: always()
@@ -216,7 +215,7 @@ jobs:
           if-no-files-found: warn
 
       # ==========================================================
-      # 10. Upload screenshots and attachments
+      # 9. Upload screenshots and attachments
       # ==========================================================
       - name: Upload screenshots and attachments
         if: always()
@@ -233,18 +232,34 @@ jobs:
           if-no-files-found: ignore
 
       # ==========================================================
-      # 11. Fail the GitHub Actions job if XCUI tests failed
+      # 10. Final workflow status
       #
-      # This step is intentionally LAST so that all reports and
-      # artifacts are uploaded before the job is marked failed.
+      # This is the ONLY step that fails the workflow.
+      # It runs AFTER reports and artifacts are uploaded.
       # ==========================================================
-      - name: Fail workflow if XCUI tests failed
+      - name: Set final XCUI test status
         if: always()
         run: |
-          if [ "${{ steps.xcui_tests.outcome }}" != "success" ]; then
-            echo "❌ XCUI tests failed."
-            echo "Please download the xcui-test-results artifact for details."
-            exit 1
-          fi
 
-          echo "✅ All XCUI tests passed successfully."
+          echo "======================================"
+          echo "Final XCUI Test Status"
+          echo "======================================"
+
+          echo "XCUI_TEST_EXIT_CODE=${XCUI_TEST_EXIT_CODE:-unknown}"
+
+          if [ "${XCUI_TEST_EXIT_CODE:-1}" != "0" ]; then
+
+            echo ""
+            echo "❌ XCUI tests failed."
+            echo "Test reports and artifacts have already been uploaded."
+            echo ""
+
+            exit 1
+
+          else
+
+            echo ""
+            echo "✅ All XCUI tests passed successfully."
+            echo ""
+
+          fi
