@@ -1,26 +1,29 @@
 name: XCUI Tests
 
+# ==========================================================
+# Workflow runs ONLY when manually triggered
+# GitHub Actions → XCUI Tests → Run workflow
+# ==========================================================
 on:
-  pull_request:
-    branches:
-      - master
-      - main
-
-  push:
-    branches:
-      - master
-      - main
-
-  schedule:
-    - cron: "0 6 * * *"
-
-  # Allows manual execution from GitHub Actions
   workflow_dispatch:
+    inputs:
+      simulator:
+        description: "iOS Simulator"
+        required: true
+        default: "iPhone 16"
+        type: string
+
+      scheme:
+        description: "Xcode Scheme"
+        required: true
+        default: "MyApp"
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+
   xcui-tests:
 
     name: XCUI Tests
@@ -43,14 +46,17 @@ jobs:
       # ==========================================================
       - name: Select Xcode
         run: |
+
           echo "Available Xcode versions:"
           ls -la /Applications | grep Xcode || true
 
           sudo xcode-select -s /Applications/Xcode.app
 
+          echo ""
           echo "Selected Xcode:"
           xcode-select -p
 
+          echo ""
           echo "Xcode version:"
           xcodebuild -version
 
@@ -59,6 +65,7 @@ jobs:
       # ==========================================================
       - name: List available iOS simulators
         run: |
+
           echo "Available iOS simulators:"
           xcrun simctl list devices available
 
@@ -67,33 +74,31 @@ jobs:
       # ==========================================================
       - name: Prepare test results directory
         run: |
+
           rm -rf test-results
           mkdir -p test-results
 
       # ==========================================================
       # 5. Run XCUI tests
-      #
-      # IMPORTANT:
-      # Change:
-      #
-      # MyApp.xcworkspace
-      # MyApp
-      # iPhone 16
-      #
-      # according to your project.
       # ==========================================================
       - name: Run XCUI tests
         id: xcui_tests
         continue-on-error: true
         run: |
-          echo "Starting XCUI test execution..."
+
+          echo "======================================"
+          echo "Starting XCUI test execution"
+          echo "======================================"
+
+          echo "Scheme: ${{ inputs.scheme }}"
+          echo "Simulator: ${{ inputs.simulator }}"
 
           set +e
 
           xcodebuild \
             -workspace MyApp.xcworkspace \
-            -scheme MyApp \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -scheme "${{ inputs.scheme }}" \
+            -destination "platform=iOS Simulator,name=${{ inputs.simulator }},OS=latest" \
             -resultBundlePath "$PWD/test-results/XCUIResults.xcresult" \
             clean test \
             2>&1 | tee "$PWD/test-results/xcodebuild.log"
@@ -110,7 +115,7 @@ jobs:
           exit 0
 
       # ==========================================================
-      # 6. Generate xcresult JSON report
+      # 6. Generate XCResult JSON report
       # ==========================================================
       - name: Generate XCUI result report
         if: always()
@@ -138,7 +143,7 @@ jobs:
           fi
 
       # ==========================================================
-      # 7. Extract test summary
+      # 7. Generate GitHub Actions test summary
       # ==========================================================
       - name: Generate test execution summary
         if: always()
@@ -148,7 +153,7 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## Test Execution" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Test Execution Details" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
@@ -157,7 +162,10 @@ jobs:
           echo "| Repository | ${{ github.repository }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Trigger | Manual |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Runner | ${{ runner.os }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Simulator | ${{ inputs.simulator }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scheme | ${{ inputs.scheme }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Xcode | $(xcodebuild -version | head -1) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Test Exit Code | ${XCUI_TEST_EXIT_CODE:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
 
@@ -187,20 +195,17 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## 📦 Test Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 Available Artifacts" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "- XCResult bundle" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Xcode build/test log" >> "$GITHUB_STEP_SUMMARY"
-          echo "- XCResult JSON report" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Screenshots and attachments, if generated" >> "$GITHUB_STEP_SUMMARY"
+          echo "- XCResult bundle"
+          echo "- Xcode build/test log"
+          echo "- XCResult JSON report"
+          echo "- Screenshots and attachments, if generated"
 
       # ==========================================================
       # 8. Upload XCUI test results
-      #
-      # IMPORTANT:
-      # always() ensures artifacts are uploaded even if tests fail.
       # ==========================================================
       - name: Upload XCUI test results
         if: always()
@@ -234,8 +239,7 @@ jobs:
       # ==========================================================
       # 10. Final workflow status
       #
-      # This is the ONLY step that fails the workflow.
-      # It runs AFTER reports and artifacts are uploaded.
+      # Reports and artifacts are uploaded BEFORE this step.
       # ==========================================================
       - name: Set final XCUI test status
         if: always()
