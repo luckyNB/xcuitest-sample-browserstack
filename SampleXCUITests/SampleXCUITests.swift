@@ -1,10 +1,4 @@
-//
-//  SampleXCUITests.swift
-//  SampleXCUITests
-//
-//  Created by Kalam Shah on 13/02/18.
-//  Copyright © 2018 BrowserStack. All rights reserved.
-//
+
 
 import XCTest
 
